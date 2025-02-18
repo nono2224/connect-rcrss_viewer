@@ -1,5 +1,5 @@
 {
-  "name": "viewer_test",
+  "name": "connect-rcrss_viewer",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
