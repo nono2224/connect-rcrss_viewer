@@ -1,12 +1,37 @@
 const net = require("net");
 const proto = require("./RCRSProto_pb");
 const fs = require("fs");
+const fsPromises = require("fs").promises; // fs の Promise バージョンをインポート
 
 let fileNum = 0;
 let buffer = Buffer.alloc(0); // 受信データを蓄積するためのバッファ
 
+// out ディレクトリの存在確認と作成を行う関数
+async function ensureOutDir() {
+    const dirPath = "./out";
+    try {
+        await fsPromises.access(dirPath); // ディレクトリが存在するか確認
+        //console.log("Directory already exists:", dirPath); // 存在する場合は何もしない
+    } catch (error) {
+        if (error.code === "ENOENT") {
+            // ENOENT はファイル/ディレクトリが存在しないエラー
+            try {
+                await fsPromises.mkdir(dirPath); // ディレクトリを作成
+                console.log("Created directory:", dirPath);
+            } catch (mkdirError) {
+                console.error("Failed to create directory:", mkdirError);
+                throw mkdirError; // ディレクトリ作成に失敗した場合は、上位にエラーを伝播
+            }
+        } else {
+            console.error("Error checking directory:", error);
+            throw error; // 予期せぬエラーの場合は、上位にエラーを伝播
+        }
+    }
+}
+
 // メッセージをシミュレーションサーバに送信
-const client = net.connect("27931", "localhost", () => {
+const client = net.connect({ port: 27931, host: "localhost" }, () => {
+    // オブジェクト形式でオプション指定
     const message = new proto.MessageProto();
     // VKConnect: ビューワからの接続要求に使用するメッセージ
     message.setUrn(0x0100 | 13);
@@ -65,7 +90,6 @@ client.on("data", (data) => {
 
         // メッセージをJSON形式で出力
         // シミュレーション中は毎ステップごとにKVTimestepが送られてくる．中身についてはrcrs-serverのrescuecore2.messages.control.KVTimestepを参照．
-        // appendFileAsync(JSON.stringify(res.toObject()));
         writeFileAsync(JSON.stringify(res.toObject()));
 
         // 帰ってきたメッセージのURNがKVConnectOKのとき
@@ -105,6 +129,11 @@ client.on("error", (err) => {
     // 接続エラーが発生した場合の処理 (例: リトライ、終了)
 });
 
+client.on("close", () => {
+    // 接続終了時のイベントハンドラを追加 (任意)
+    console.log("Connection closed.");
+});
+
 function send(message) {
     const buffer = message.serializeBinary();
     const sizeBuffer = new Uint8Array([(buffer.length >> 24) & 255, (buffer.length >> 16) & 255, (buffer.length >> 8) & 255, buffer.length & 255]);
@@ -112,30 +141,16 @@ function send(message) {
     client.write(buffer);
 }
 
-function appendFileAsync(data) {
-    const filePath = "./out/" + fileNum + ".json";
+async function writeFileAsync(data) {
+    try {
+        await ensureOutDir(); // ディレクトリの存在確認と作成
 
-    fs.appendFile(filePath, data, (err) => {
-        if (err) {
-            console.error("ファイル追記エラー:", err);
-            return;
-        }
-        console.log("ファイルに追記しました:", filePath);
-    });
-
-    fileNum++;
-}
-
-function writeFileAsync(data) {
-    const filePath = "./out/" + fileNum + ".json";
-
-    fs.writeFile(filePath, data, (err) => {
-        if (err) {
-            console.error("ファイル書き込みエラー:", err);
-            return;
-        }
+        const filePath = "./out/" + fileNum + ".json";
+        await fsPromises.writeFile(filePath, data); // Promise バージョンの writeFile を使用
         console.log("ファイルに書き込みました:", filePath);
-    });
-
-    fileNum++;
+        fileNum++;
+    } catch (error) {
+        console.error("ファイル書き込みエラー:", error); // より詳細なエラー情報を出力
+        // 必要に応じて、ここでリトライ処理などを実装
+    }
 }
